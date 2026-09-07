@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dibujo Impostor — juego de fiesta de dibujo para grupos, gratis</title>
+<meta name="description" content="Juego de fiesta de dibujo gratis, sin descargar ninguna app. Todos reciben el mismo concepto para dibujar salvo el impostor, que recibe uno parecido pero distinto. Ideal para fiestas y quedadas, con un solo móvil compartido.">
+<meta name="keywords" content="juego del impostor, dibujo impostor, juego de fiesta, juego para grupos, juego de dibujar, juego sin descargar app, juego de móvil para fiestas, juegos para reuniones">
+<link rel="canonical" href="https://adrianezd.github.io/dibujo-impostor/">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12101c">
+
+<meta property="og:title" content="Dibujo Impostor — juego de fiesta de dibujo para grupos">
+<meta property="og:description" content="Todos dibujan el mismo concepto salvo el impostor, que recibe uno parecido pero distinto. Descubrid quién dibujó algo diferente. Gratis, un solo móvil, sin descargas.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://adrianezd.github.io/dibujo-impostor/">
+<meta property="og:image" content="https://adrianezd.github.io/dibujo-impostor/favicon.svg">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Dibujo Impostor">
+<meta name="twitter:description" content="Todos dibujan el mismo concepto salvo el impostor. Juego de fiesta gratis, un solo móvil, sin descargas.">
+<meta name="twitter:image" content="https://adrianezd.github.io/dibujo-impostor/favicon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Game",
+      "name": "Dibujo Impostor",
+      "description": "Juego de fiesta para grupos, un solo móvil compartido. Todos reciben en privado el mismo concepto para dibujar salvo el impostor, que recibe uno parecido pero distinto. El grupo dibuja, enseña sus dibujos y vota quién cree que es el impostor.",
+      "genre": ["Juego de fiesta", "Juego de dibujo", "Juego social"],
+      "applicationCategory": "Game",
+      "gamePlatform": "Web Browser",
+      "url": "https://adrianezd.github.io/dibujo-impostor/",
+      "inLanguage": "es",
+      "isAccessibleForFree": true,
+      "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 3, "maxValue": 10 },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "¿Cómo se juega a Dibujo Impostor?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Cada jugador ve en privado su concepto a dibujar. Casi todos reciben el mismo; el impostor recibe uno parecido pero distinto, sin saber que es diferente. Todos dibujan en papel, se enseñan los dibujos y el grupo vota quién cree que dibujó algo raro." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿El impostor sabe que lo es?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. El impostor ve un concepto normal y cree que es el mismo que el del resto, así que dibuja con total naturalidad. Eso hace más difícil (y más divertido) descubrirlo." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Necesito papel y lápiz?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Sí, cada jugador dibuja en papel físico (o pizarra); el móvil solo se encarga de repartir los conceptos y llevar el tiempo." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Es gratis?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Sí, completamente gratis, sin anuncios ni descargas." }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <p class="site-kicker">Juego de fiesta · 1 móvil compartido</p>
+  <h1>Dibujo Impostor</h1>
+  <p class="tagline">Todos dibujáis el mismo concepto... salvo uno. Ni él lo sabe.</p>
+</header>
+
+<main>
+
+  <div id="game-app">
+
+    <section class="screen" data-screen="setup">
+      <h2 class="visually-hidden">Preparar partida</h2>
+
+      <div class="setup-block">
+        <label class="setup-label" id="player-count-label">Número de jugadores</label>
+        <div class="stepper" role="group" aria-labelledby="player-count-label">
+          <button type="button" id="btn-player-minus" class="stepper-btn" aria-label="Restar jugador">−</button>
+          <span class="stepper-value" id="player-count-value">5</span>
+          <button type="button" id="btn-player-plus" class="stepper-btn" aria-label="Sumar jugador">+</button>
+        </div>
+      </div>
+
+      <div class="setup-block">
+        <label class="setup-label" id="impostor-count-label">Número de impostores</label>
+        <div class="stepper" role="group" aria-labelledby="impostor-count-label">
+          <button type="button" id="btn-impostor-minus" class="stepper-btn" aria-label="Restar impostor">−</button>
+          <span class="stepper-value" id="impostor-count-value">1</span>
+          <button type="button" id="btn-impostor-plus" class="stepper-btn" aria-label="Sumar impostor">+</button>
+        </div>
+        <p class="setup-hint" id="impostor-hint">Máximo 2 para 5 jugadores</p>
+      </div>
+
+      <div class="setup-block">
+        <span class="setup-label" id="category-label">Categoría de conceptos</span>
+        <div class="category-options" id="category-options" role="radiogroup" aria-labelledby="category-label"></div>
+      </div>
+
+      <button type="button" id="btn-start-game" class="btn btn-primary btn-large">Crear sala</button>
+    </section>
+
+    <section class="screen" data-screen="reveal" hidden>
+      <div class="reveal-wrap">
+        <p class="reveal-progress" id="reveal-progress">Jugador 1 de 5</p>
+        <h2 class="reveal-player-label" id="reveal-player-label">Pasa el móvil a Jugador 1</h2>
+        <p class="reveal-warning">Solo esta persona debe mirar la pantalla</p>
+
+        <button type="button" id="hold-reveal-btn" class="hold-button" aria-describedby="hold-prompt">
+          <span id="hold-prompt">Mantén pulsado<br>para ver tu concepto</span>
+          <div id="role-panel" class="role-panel" hidden>
+            <span id="role-category-label" class="role-category-label"></span>
+            <div id="role-content" class="role-content"></div>
+          </div>
+        </button>
+
+        <button type="button" id="btn-next-player" class="btn btn-secondary btn-large" disabled>Ya lo vi, pasar al siguiente</button>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="draw" hidden>
+      <div class="discussion-wrap">
+        <h2>¡A dibujar!</h2>
+        <p class="discussion-help">Cada jugador dibuja su concepto en un papel, sin enseñarlo todavía. Cuando el tiempo se acabe (o cuando queráis), pasad a la votación.</p>
+
+        <div class="timer-block">
+          <span class="timer-display" id="timer-display">01:00</span>
+          <div class="timer-controls">
+            <button type="button" id="btn-timer-minus" class="btn btn-ghost" aria-label="Restar 15 segundos">−15s</button>
+            <button type="button" id="btn-timer-toggle" class="btn btn-ghost">Pausar</button>
+            <button type="button" id="btn-timer-plus" class="btn btn-ghost" aria-label="Sumar 15 segundos">+15s</button>
+          </div>
+        </div>
+
+        <button type="button" id="btn-go-to-vote" class="btn btn-primary btn-large">Enseñar dibujos y votar</button>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="vote" hidden>
+      <div class="discussion-wrap">
+        <h2>¿Quién dibujó algo raro?</h2>
+        <p class="discussion-help">Enseñad todos los dibujos a la vez. Tocad el nombre de cada jugador para sumarle un voto según lo que decidáis en grupo.</p>
+        <div class="vote-buttons" id="vote-buttons"></div>
+        <button type="button" id="btn-reveal" class="btn btn-primary btn-large">Revelar impostor(es)</button>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="results" hidden>
+      <div class="results-wrap">
+        <h2>Resultados de la ronda</h2>
+
+        <p class="results-label">Concepto normal</p>
+        <p class="results-word" id="results-concept-a">—</p>
+        <p class="results-label">Concepto del impostor</p>
+        <p class="results-word" id="results-concept-b">—</p>
+
+        <p class="results-label">El/los impostor(es) eran</p>
+        <ul class="results-impostors" id="results-impostors"></ul>
+
+        <p class="results-category" id="results-votes"></p>
+
+        <div class="results-actions">
+          <button type="button" id="btn-play-again" class="btn btn-primary btn-large">Jugar otra ronda</button>
+          <button type="button" id="btn-new-game" class="btn btn-secondary btn-large">Nueva partida</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <section class="info-section" id="como-jugar">
+    <h2>Cómo jugar</h2>
+    <ol class="how-to-list">
+      <li><strong>Prepara la partida.</strong> Elige cuántos jugadores sois (3 a 10), cuántos impostores habrá y qué categoría de conceptos queréis usar.</li>
+      <li><strong>Reparte los conceptos.</strong> El móvil se pasa de jugador en jugador. Cada persona mantiene pulsado para ver en privado su concepto a dibujar.</li>
+      <li><strong>El impostor no sabe que lo es.</strong> Recibe un concepto parecido pero distinto (p. ej. "Helicóptero" en vez de "Avión"), sin ninguna pista de que es diferente.</li>
+      <li><strong>A dibujar.</strong> Cada jugador dibuja su concepto en papel, sin enseñarlo todavía. Hay un cronómetro orientativo (ajustable).</li>
+      <li><strong>Enseñad y votad.</strong> Mostrad todos los dibujos a la vez y votad quién creéis que dibujó algo distinto al resto.</li>
+      <li><strong>Revelación.</strong> Se descubre quién era el impostor, qué concepto tenía, y si el grupo acertó con la votación.</li>
+    </ol>
+  </section>
+
+  <section class="info-section" id="faq">
+    <h2>Preguntas frecuentes</h2>
+    <div class="faq-item">
+      <h3>¿Cómo se juega a Dibujo Impostor?</h3>
+      <p>Cada jugador ve en privado su concepto a dibujar. Casi todos reciben el mismo; el impostor recibe uno parecido pero distinto, sin saber que es diferente. Todos dibujan en papel, se enseñan los dibujos y el grupo vota quién cree que dibujó algo raro.</p>
+    </div>
+    <div class="faq-item">
+      <h3>¿El impostor sabe que lo es?</h3>
+      <p>No. El impostor ve un concepto normal y cree que es el mismo que el del resto, así que dibuja con total naturalidad. Eso hace más difícil (y más divertido) descubrirlo.</p>
+    </div>
+    <div class="faq-item">
+      <h3>¿Necesito papel y lápiz?</h3>
+      <p>Sí, cada jugador dibuja en papel físico (o pizarra); el móvil solo se encarga de repartir los conceptos y llevar el tiempo.</p>
+    </div>
+    <div class="faq-item">
+      <h3>¿Es gratis?</h3>
+      <p>Sí, completamente gratis, sin anuncios ni descargas.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>Dibujo Impostor es un juego de fiesta original, no afiliado a ninguna marca comercial.</p>
+  <p>Hecho para jugar en cualquier móvil, sin cuentas ni descargas.</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
