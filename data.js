@@ -1,74 +1,132 @@
 'use strict';
+
 /* =========================================================================
    DIBUJO IMPOSTOR — pares de conceptos parecidos pero distintos
-   Todos los jugadores reciben el mismo concepto (A) salvo el/los
-   impostor(es), que reciben el concepto B: parecido, pero no igual.
-   Contenido 100% original.
+   En el modo Clásico todos dibujan el concepto A salvo el/los impostor(es),
+   que reciben el B: parecido, pero no igual. En los modos «A ciegas» y
+   «Lienzo compartido» se usa solo el concepto A. Contenido 100% original.
    ========================================================================= */
 
-var PAIR_CATEGORIES = {
+function P(a, emojiA, b, emojiB) {
+  return { a: { nombre: a, emoji: emojiA }, b: { nombre: b, emoji: emojiB } };
+}
+
+const PAIR_CATEGORIES = {
   animales: {
-    label: 'Animales',
+    label: 'Animales', emoji: '🐾',
     pairs: [
-      { a: { nombre: 'Perro', emoji: '🐶' }, b: { nombre: 'Lobo', emoji: '🐺' } },
-      { a: { nombre: 'Gato', emoji: '🐱' }, b: { nombre: 'Tigre', emoji: '🐯' } },
-      { a: { nombre: 'Caballo', emoji: '🐴' }, b: { nombre: 'Cebra', emoji: '🦓' } },
-      { a: { nombre: 'Delfín', emoji: '🐬' }, b: { nombre: 'Tiburón', emoji: '🦈' } },
-      { a: { nombre: 'Oso', emoji: '🐻' }, b: { nombre: 'Panda', emoji: '🐼' } },
-      { a: { nombre: 'Conejo', emoji: '🐰' }, b: { nombre: 'Ardilla', emoji: '🐿️' } },
-      { a: { nombre: 'Pingüino', emoji: '🐧' }, b: { nombre: 'Foca', emoji: '🦭' } },
-      { a: { nombre: 'León', emoji: '🦁' }, b: { nombre: 'Gorila', emoji: '🦍' } },
-      { a: { nombre: 'Loro', emoji: '🦜' }, b: { nombre: 'Pavo real', emoji: '🦚' } },
-      { a: { nombre: 'Rana', emoji: '🐸' }, b: { nombre: 'Camaleón', emoji: '🦎' } }
-    ]
-  },
-  transporte: {
-    label: 'Transporte',
-    pairs: [
-      { a: { nombre: 'Avión', emoji: '✈️' }, b: { nombre: 'Helicóptero', emoji: '🚁' } },
-      { a: { nombre: 'Coche', emoji: '🚗' }, b: { nombre: 'Camión', emoji: '🚚' } },
-      { a: { nombre: 'Bicicleta', emoji: '🚲' }, b: { nombre: 'Moto', emoji: '🏍️' } },
-      { a: { nombre: 'Barco', emoji: '🚢' }, b: { nombre: 'Ferry', emoji: '⛴️' } },
-      { a: { nombre: 'Tren', emoji: '🚆' }, b: { nombre: 'Metro', emoji: '🚇' } },
-      { a: { nombre: 'Cohete', emoji: '🚀' }, b: { nombre: 'Globo aerostático', emoji: '🎈' } },
-      { a: { nombre: 'Taxi', emoji: '🚕' }, b: { nombre: 'Autobús', emoji: '🚌' } }
+      P('Perro', '🐶', 'Lobo', '🐺'), P('Gato', '🐱', 'Tigre', '🐯'), P('Caballo', '🐴', 'Cebra', '🦓'),
+      P('Delfín', '🐬', 'Tiburón', '🦈'), P('Oso', '🐻', 'Panda', '🐼'), P('Conejo', '🐰', 'Ardilla', '🐿️'),
+      P('Pingüino', '🐧', 'Foca', '🦭'), P('León', '🦁', 'Gorila', '🦍'), P('Loro', '🦜', 'Pavo real', '🦚'),
+      P('Rana', '🐸', 'Camaleón', '🦎'), P('Vaca', '🐮', 'Cerdo', '🐷'), P('Pulpo', '🐙', 'Calamar', '🦑'),
+      P('Abeja', '🐝', 'Mariquita', '🐞'), P('Elefante', '🐘', 'Rinoceronte', '🦏'), P('Jirafa', '🦒', 'Camello', '🐫'),
+      P('Búho', '🦉', 'Águila', '🦅'), P('Serpiente', '🐍', 'Cocodrilo', '🐊'), P('Caracol', '🐌', 'Tortuga', '🐢'),
+      P('Ballena', '🐋', 'Pez', '🐟'), P('Mariposa', '🦋', 'Murciélago', '🦇')
     ]
   },
   comida: {
-    label: 'Comida',
+    label: 'Comida', emoji: '🍕',
     pairs: [
-      { a: { nombre: 'Manzana', emoji: '🍎' }, b: { nombre: 'Pera', emoji: '🍐' } },
-      { a: { nombre: 'Hamburguesa', emoji: '🍔' }, b: { nombre: 'Sándwich', emoji: '🥪' } },
-      { a: { nombre: 'Plátano', emoji: '🍌' }, b: { nombre: 'Pepino', emoji: '🥒' } },
-      { a: { nombre: 'Pizza', emoji: '🍕' }, b: { nombre: 'Tarta', emoji: '🥧' } },
-      { a: { nombre: 'Donut', emoji: '🍩' }, b: { nombre: 'Magdalena', emoji: '🧁' } },
-      { a: { nombre: 'Uvas', emoji: '🍇' }, b: { nombre: 'Arándanos', emoji: '🫐' } },
-      { a: { nombre: 'Zanahoria', emoji: '🥕' }, b: { nombre: 'Maíz', emoji: '🌽' } }
+      P('Manzana', '🍎', 'Pera', '🍐'), P('Hamburguesa', '🍔', 'Sándwich', '🥪'), P('Plátano', '🍌', 'Pepino', '🥒'),
+      P('Pizza', '🍕', 'Tarta', '🥧'), P('Donut', '🍩', 'Magdalena', '🧁'), P('Uvas', '🍇', 'Cerezas', '🍒'),
+      P('Zanahoria', '🥕', 'Maíz', '🌽'), P('Helado', '🍦', 'Batido', '🥤'), P('Huevo frito', '🍳', 'Tortita', '🥞'),
+      P('Sandía', '🍉', 'Melón', '🍈'), P('Perrito caliente', '🌭', 'Burrito', '🌯'), P('Espaguetis', '🍝', 'Ramen', '🍜'),
+      P('Fresa', '🍓', 'Tomate', '🍅'), P('Palomitas', '🍿', 'Patatas fritas', '🍟'), P('Croissant', '🥐', 'Pan', '🍞'),
+      P('Piña', '🍍', 'Coco', '🥥'), P('Queso', '🧀', 'Mantequilla', '🧈'), P('Sushi', '🍣', 'Brocheta', '🍢')
+    ]
+  },
+  transporte: {
+    label: 'Transporte', emoji: '🚀',
+    pairs: [
+      P('Avión', '✈️', 'Helicóptero', '🚁'), P('Coche', '🚗', 'Camión', '🚚'), P('Bicicleta', '🚲', 'Moto', '🏍️'),
+      P('Barco', '🚢', 'Submarino', '🌊'), P('Tren', '🚆', 'Tranvía', '🚋'), P('Cohete', '🚀', 'Ovni', '🛸'),
+      P('Taxi', '🚕', 'Autobús', '🚌'), P('Globo aerostático', '🎈', 'Paracaídas', '🪂'), P('Velero', '⛵', 'Canoa', '🛶'),
+      P('Ambulancia', '🚑', 'Camión de bomberos', '🚒'), P('Patinete', '🛴', 'Monopatín', '🛹'), P('Tractor', '🚜', 'Excavadora', '🏗️')
     ]
   },
   lugares: {
-    label: 'Lugares',
+    label: 'Lugares', emoji: '📍',
     pairs: [
-      { a: { nombre: 'Playa', emoji: '🏖️' }, b: { nombre: 'Desierto', emoji: '🏜️' } },
-      { a: { nombre: 'Castillo', emoji: '🏰' }, b: { nombre: 'Iglesia', emoji: '⛪' } },
-      { a: { nombre: 'Montaña', emoji: '⛰️' }, b: { nombre: 'Volcán', emoji: '🌋' } },
-      { a: { nombre: 'Bosque', emoji: '🌲' }, b: { nombre: 'Palmera', emoji: '🌴' } },
-      { a: { nombre: 'Ciudad', emoji: '🏙️' }, b: { nombre: 'Pueblo', emoji: '🏘️' } },
-      { a: { nombre: 'Faro', emoji: '🗼' }, b: { nombre: 'Molino', emoji: '🏭' } }
+      P('Playa', '🏖️', 'Desierto', '🏜️'), P('Castillo', '🏰', 'Iglesia', '⛪'), P('Montaña', '⛰️', 'Volcán', '🌋'),
+      P('Bosque', '🌲', 'Selva', '🌴'), P('Ciudad', '🏙️', 'Pueblo', '🏘️'), P('Faro', '🗼', 'Molino', '🌾'),
+      P('Isla', '🏝️', 'Barco pirata', '🏴‍☠️'), P('Camping', '🏕️', 'Cabaña', '🛖'), P('Estadio', '🏟️', 'Circo', '🎪'),
+      P('Hospital', '🏥', 'Colegio', '🏫'), P('Noria', '🎡', 'Montaña rusa', '🎢'), P('Iglú', '🧊', 'Tienda de campaña', '⛺')
     ]
   },
   objetos: {
-    label: 'Objetos',
+    label: 'Objetos', emoji: '🧸',
     pairs: [
-      { a: { nombre: 'Reloj de pulsera', emoji: '⌚' }, b: { nombre: 'Reloj de pared', emoji: '🕰️' } },
-      { a: { nombre: 'Libro', emoji: '📖' }, b: { nombre: 'Cuaderno', emoji: '📓' } },
-      { a: { nombre: 'Llave', emoji: '🔑' }, b: { nombre: 'Candado', emoji: '🔒' } },
-      { a: { nombre: 'Vela', emoji: '🕯️' }, b: { nombre: 'Bombilla', emoji: '💡' } },
-      { a: { nombre: 'Paraguas', emoji: '☂️' }, b: { nombre: 'Sombrilla', emoji: '⛱️' } },
-      { a: { nombre: 'Guitarra', emoji: '🎸' }, b: { nombre: 'Violín', emoji: '🎻' } }
+      P('Reloj de pulsera', '⌚', 'Reloj de pared', '🕰️'), P('Libro', '📖', 'Cuaderno', '📓'), P('Llave', '🔑', 'Candado', '🔒'),
+      P('Vela', '🕯️', 'Bombilla', '💡'), P('Paraguas', '☂️', 'Sombrilla', '⛱️'), P('Gafas', '👓', 'Prismáticos', '🔭'),
+      P('Tijeras', '✂️', 'Pinzas', '🗜️'), P('Martillo', '🔨', 'Hacha', '🪓'), P('Teléfono móvil', '📱', 'Mando a distancia', '🎮'),
+      P('Silla', '🪑', 'Sofá', '🛋️'), P('Cama', '🛏️', 'Hamaca', '🏝️'), P('Taza', '☕', 'Tetera', '🫖'),
+      P('Escoba', '🧹', 'Fregona', '🪣'), P('Regalo', '🎁', 'Caja de cartón', '📦'), P('Globo', '🎈', 'Cometa', '🪁'),
+      P('Imán', '🧲', 'Herradura', '🐴')
+    ]
+  },
+  deportes: {
+    label: 'Deportes', emoji: '⚽',
+    pairs: [
+      P('Fútbol', '⚽', 'Rugby', '🏉'), P('Baloncesto', '🏀', 'Voleibol', '🏐'), P('Tenis', '🎾', 'Ping-pong', '🏓'),
+      P('Esquí', '⛷️', 'Snowboard', '🏂'), P('Surf', '🏄', 'Natación', '🏊'), P('Boxeo', '🥊', 'Kárate', '🥋'),
+      P('Golf', '⛳', 'Hockey', '🏑'), P('Bolos', '🎳', 'Billar', '🎱'), P('Ciclismo', '🚴', 'Equitación', '🏇'),
+      P('Escalada', '🧗', 'Senderismo', '🥾'), P('Tiro con arco', '🏹', 'Dardos', '🎯'), P('Pesas', '🏋️', 'Yoga', '🧘')
+    ]
+  },
+  profesiones: {
+    label: 'Profesiones', emoji: '👩‍🔧',
+    pairs: [
+      P('Bombero', '👨‍🚒', 'Policía', '👮'), P('Médico', '👩‍⚕️', 'Dentista', '🦷'), P('Cocinero', '👨‍🍳', 'Panadero', '🥖'),
+      P('Astronauta', '👩‍🚀', 'Buzo', '🤿'), P('Pintor', '👨‍🎨', 'Fotógrafo', '📷'), P('Granjero', '👩‍🌾', 'Jardinero', '🌻'),
+      P('Pirata', '🏴‍☠️', 'Vaquero', '🤠'), P('Mago', '🎩', 'Payaso', '🤡'), P('Cantante', '🎤', 'DJ', '🎧'),
+      P('Detective', '🕵️', 'Ladrón', '💰'), P('Profesor', '👩‍🏫', 'Juez', '👨‍⚖️'), P('Mecánico', '🔧', 'Electricista', '⚡')
+    ]
+  },
+  casa: {
+    label: 'En casa', emoji: '🏠',
+    pairs: [
+      P('Nevera', '🧊', 'Horno', '🔥'), P('Lavadora', '🫧', 'Microondas', '📟'), P('Bañera', '🛁', 'Ducha', '🚿'),
+      P('Váter', '🚽', 'Lavabo', '🚰'), P('Televisión', '📺', 'Ordenador', '💻'), P('Lámpara', '💡', 'Ventilador', '🌀'),
+      P('Ventana', '🪟', 'Puerta', '🚪'), P('Escalera', '🪜', 'Ascensor', '🛗'), P('Cepillo de dientes', '🪥', 'Peine', '💇'),
+      P('Sartén', '🍳', 'Olla', '🍲'), P('Espejo', '🪞', 'Cuadro', '🖼️'), P('Chimenea', '🔥', 'Radiador', '♨️')
+    ]
+  },
+  naturaleza: {
+    label: 'Naturaleza', emoji: '🌿',
+    pairs: [
+      P('Sol', '☀️', 'Luna', '🌙'), P('Nube', '☁️', 'Tormenta', '⛈️'), P('Árbol', '🌳', 'Cactus', '🌵'),
+      P('Flor', '🌸', 'Seta', '🍄'), P('Arcoíris', '🌈', 'Puente', '🌉'), P('Copo de nieve', '❄️', 'Estrella', '⭐'),
+      P('Tornado', '🌪️', 'Ola', '🌊'), P('Hoja', '🍃', 'Pluma', '🪶'), P('Hoguera', '🔥', 'Volcán', '🌋'),
+      P('Girasol', '🌻', 'Tulipán', '🌷'), P('Cometa', '☄️', 'Planeta', '🪐'), P('Muñeco de nieve', '⛄', 'Espantapájaros', '🌾')
+    ]
+  },
+  fantasia: {
+    label: 'Fantasía', emoji: '🐉',
+    pairs: [
+      P('Dragón', '🐉', 'Dinosaurio', '🦖'), P('Unicornio', '🦄', 'Caballo con alas', '🐎'), P('Sirena', '🧜‍♀️', 'Pez payaso', '🐠'),
+      P('Vampiro', '🧛', 'Murciélago', '🦇'), P('Fantasma', '👻', 'Momia', '🧟'), P('Bruja', '🧙‍♀️', 'Hada', '🧚'),
+      P('Robot', '🤖', 'Extraterrestre', '👽'), P('Rey', '🤴', 'Caballero', '🛡️'), P('Princesa', '👸', 'Reina', '👑'),
+      P('Genio de la lámpara', '🧞', 'Mago', '🪄'), P('Calabaza de Halloween', '🎃', 'Calavera', '💀'), P('Papá Noel', '🎅', 'Elfo', '🧝')
+    ]
+  },
+  ropa: {
+    label: 'Ropa', emoji: '👕',
+    pairs: [
+      P('Gorra', '🧢', 'Sombrero de copa', '🎩'), P('Camiseta', '👕', 'Vestido', '👗'), P('Zapatilla', '👟', 'Bota', '🥾'),
+      P('Bufanda', '🧣', 'Corbata', '👔'), P('Guantes', '🧤', 'Calcetines', '🧦'), P('Bikini', '👙', 'Bañador', '🩳'),
+      P('Corona', '👑', 'Casco', '⛑️'), P('Tacón', '👠', 'Chancla', '🩴'), P('Mochila', '🎒', 'Bolso', '👜'),
+      P('Gafas de sol', '🕶️', 'Antifaz', '🎭')
+    ]
+  },
+  musica: {
+    label: 'Música y ocio', emoji: '🎸',
+    pairs: [
+      P('Guitarra', '🎸', 'Violín', '🎻'), P('Piano', '🎹', 'Acordeón', '🪗'), P('Trompeta', '🎺', 'Saxofón', '🎷'),
+      P('Tambor', '🥁', 'Maracas', '🪇'), P('Micrófono', '🎤', 'Altavoz', '🔊'), P('Dados', '🎲', 'Cartas', '🃏'),
+      P('Videoconsola', '🎮', 'Joystick', '🕹️'), P('Ajedrez', '♟️', 'Puzle', '🧩'), P('Cámara de cine', '🎥', 'Claqueta', '🎬'),
+      P('Tarta de cumpleaños', '🎂', 'Piñata', '🪅')
     ]
   }
 };
 
-var PAIR_CATEGORY_KEYS = Object.keys(PAIR_CATEGORIES);
-var PAIR_MEZCLA_KEY = 'mezcla';
+const PAIR_CATEGORY_KEYS = Object.keys(PAIR_CATEGORIES);
