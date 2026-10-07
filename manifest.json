@@ -1,12 +1,17 @@
 {
-  "name": "Dibujo Impostor",
+  "name": "Dibujo Impostor - Juego de fiesta",
   "short_name": "Dibujo Impostor",
-  "description": "Todos dibujáis el mismo concepto salvo uno.",
+  "description": "Todos dibujáis el mismo concepto salvo uno. 3 modos, lienzo compartido y +150 parejas.",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#12101c",
-  "theme_color": "#12101c",
+  "orientation": "portrait",
+  "background_color": "#110b0a",
+  "theme_color": "#110b0a",
+  "lang": "es",
+  "categories": ["games", "entertainment"],
   "icons": [
-    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

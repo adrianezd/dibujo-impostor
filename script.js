@@ -2,423 +2,775 @@
 
 /* =========================================================================
    DIBUJO IMPOSTOR — lógica del juego
-   Todos reciben el mismo concepto para dibujar salvo el/los impostor(es),
-   que reciben un concepto parecido pero distinto. Nadie sabe si tiene el
-   concepto "raro": ni el propio impostor. El estado de la ronda vive solo
-   en memoria (nunca en localStorage), así que un refresco lo borra.
+   Modos:
+    - Concepto parecido: el impostor recibe un concepto parecido y no sabe
+      que es el impostor.
+    - A ciegas: el impostor sabe que lo es y solo conoce la categoría.
+    - Lienzo compartido: un único dibujo en el móvil, un trazo por turno.
+   El estado de la ronda vive solo en memoria (nunca en localStorage).
    ========================================================================= */
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 10;
-const DEFAULT_DRAW_SECONDS = 60;
-const MIN_TIMER_SECONDS = 0;
-const MAX_TIMER_SECONDS = 600;
+const DRAW_TIME_OPTIONS = [30, 45, 60, 90, 120, 180]; // segundos
+const MIN_STROKE_ROUNDS = 1;
+const MAX_STROKE_ROUNDS = 3;
 const TIMER_STEP = 15;
-const SETTINGS_KEY = 'dibujo-impostor-settings-v1';
+const SETTINGS_KEY = 'dibujo-impostor-settings-v2';
+const LEGACY_SETTINGS_KEY = 'dibujo-impostor-settings-v1';
+const RECENT_LIMIT = 40;
+
+const PLAYER_COLORS = ['#e11d48', '#2563eb', '#16a34a', '#f59e0b', '#9333ea', '#0891b2', '#ea580c', '#db2777', '#4d7c0f', '#475569'];
+
+const MODES = [
+  { key: 'clasico', emoji: '🎭', label: 'Concepto parecido', sub: 'El impostor dibuja algo parecido… sin saberlo' },
+  { key: 'ciego', emoji: '🙈', label: 'A ciegas', sub: 'El impostor solo sabe la categoría' },
+  { key: 'lienzo', emoji: '🖌️', label: 'Lienzo compartido', sub: 'Un dibujo en el móvil, un trazo por turno' }
+];
+
+/* --------------------------------- Estado ---------------------------------- */
 
 let settings = {
+  mode: 'clasico',
   playerCount: 5,
   impostorCount: 1,
-  categoryKey: PAIR_MEZCLA_KEY
+  categories: PAIR_CATEGORY_KEYS.slice(),
+  drawSeconds: 60,
+  strokeRounds: 2,
+  showCategory: true,
+  secretVote: false
 };
+
 let impostorManuallySet = false;
 let round = null;
 let isAdvancing = false;
-let lastPairKey = null;
+const recent = [];
+const scores = Kit.createScores();
+let timer = null;
 
-function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
-function maxImpostorsFor(playerCount) { return Math.max(1, Math.floor((playerCount - 1) / 2)); }
-function suggestedImpostorCount(playerCount) { return playerCount >= 7 ? Math.min(2, maxImpostorsFor(playerCount)) : 1; }
+/* --------------------------------- Utilidades ------------------------------- */
 
-function shuffled(array) {
-  const copy = array.slice();
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+function maxImpostorsFor(playerCount) {
+  return Math.max(1, Math.floor((playerCount - 1) / 2));
+}
+
+function suggestedImpostorCount(playerCount) {
+  return playerCount >= 7 ? Math.min(2, maxImpostorsFor(playerCount)) : 1;
+}
+
+function modeInfo(key) {
+  return MODES.find((m) => m.key === key) || MODES[0];
+}
+
+function buildPool() {
+  const pool = [];
+  settings.categories.forEach((key) => {
+    const cat = PAIR_CATEGORIES[key];
+    if (!cat) return;
+    cat.pairs.forEach((pair) => pool.push({ id: `${pair.a.nombre}/${pair.b.nombre}`, pair, key }));
+  });
+  return pool;
+}
+
+function pickFromPool(pool) {
+  let candidates = pool.filter((item) => !recent.includes(item.id));
+  if (!candidates.length) {
+    recent.length = 0;
+    candidates = pool;
   }
-  return copy;
+  const item = Kit.pick(candidates);
+  recent.push(item.id);
+  if (recent.length > RECENT_LIMIT) recent.shift();
+  return item;
 }
 
-function pickImpostorIndices(playerCount, impostorCount) {
-  const indices = Array.from({ length: playerCount }, (_, i) => i);
-  return new Set(shuffled(indices).slice(0, impostorCount));
-}
-
-function pickPairForCategory(categoryKey) {
-  let realKey = categoryKey;
-  if (categoryKey === PAIR_MEZCLA_KEY) {
-    realKey = PAIR_CATEGORY_KEYS[Math.floor(Math.random() * PAIR_CATEGORY_KEYS.length)];
-  }
-  const list = PAIR_CATEGORIES[realKey].pairs;
-  let candidates = list;
-  const withKeys = list.map((p, i) => realKey + '-' + i);
-  if (list.length > 1 && lastPairKey !== null) {
-    const filteredIdx = withKeys.map((k, i) => k !== lastPairKey ? i : -1).filter((i) => i !== -1);
-    if (filteredIdx.length > 0) candidates = filteredIdx.map((i) => list[i]);
-  }
-  const idx = Math.floor(Math.random() * candidates.length);
-  const pair = candidates[idx];
-  const pairKey = realKey + '-' + list.indexOf(pair);
-  return { pair, pairKey, categoryLabel: PAIR_CATEGORIES[realKey].label };
-}
-
-function formatTime(totalSeconds) {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
+/* ------------------------------ Persistencia -------------------------------- */
 
 function loadSettings() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.playerCount === 'number') {
-      settings.playerCount = clamp(Math.round(parsed.playerCount), MIN_PLAYERS, MAX_PLAYERS);
-    }
-    if (typeof parsed.categoryKey === 'string' &&
-        (parsed.categoryKey === PAIR_MEZCLA_KEY || PAIR_CATEGORY_KEYS.includes(parsed.categoryKey))) {
-      settings.categoryKey = parsed.categoryKey;
-    }
-    const max = maxImpostorsFor(settings.playerCount);
-    if (typeof parsed.impostorCount === 'number') {
-      settings.impostorCount = clamp(Math.round(parsed.impostorCount), 1, max);
-      impostorManuallySet = true;
-    } else {
-      settings.impostorCount = suggestedImpostorCount(settings.playerCount);
-    }
-  } catch (err) { /* localStorage inaccesible: seguimos con valores por defecto */ }
+  const saved = Kit.load(SETTINGS_KEY, null);
+  const legacy = saved ? null : Kit.load(LEGACY_SETTINGS_KEY, null);
+  const parsed = saved || legacy || {};
+
+  if (MODES.some((m) => m.key === parsed.mode)) settings.mode = parsed.mode;
+  if (typeof parsed.playerCount === 'number') {
+    settings.playerCount = Kit.clamp(Math.round(parsed.playerCount), MIN_PLAYERS, MAX_PLAYERS);
+  }
+  const max = maxImpostorsFor(settings.playerCount);
+  if (typeof parsed.impostorCount === 'number') {
+    settings.impostorCount = Kit.clamp(Math.round(parsed.impostorCount), 1, max);
+    impostorManuallySet = true;
+  } else {
+    settings.impostorCount = suggestedImpostorCount(settings.playerCount);
+  }
+  if (Array.isArray(parsed.categories)) {
+    const valid = parsed.categories.filter((k) => PAIR_CATEGORY_KEYS.includes(k));
+    if (valid.length) settings.categories = valid;
+  } else if (legacy && PAIR_CATEGORY_KEYS.includes(legacy.categoryKey)) {
+    settings.categories = [legacy.categoryKey];
+  }
+  if (DRAW_TIME_OPTIONS.includes(parsed.drawSeconds)) settings.drawSeconds = parsed.drawSeconds;
+  if (typeof parsed.strokeRounds === 'number') {
+    settings.strokeRounds = Kit.clamp(Math.round(parsed.strokeRounds), MIN_STROKE_ROUNDS, MAX_STROKE_ROUNDS);
+  }
+  if (typeof parsed.showCategory === 'boolean') settings.showCategory = parsed.showCategory;
+  if (typeof parsed.secretVote === 'boolean') settings.secretVote = parsed.secretVote;
 }
 
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (err) { /* no disponible */ }
+  Kit.save(SETTINGS_KEY, settings);
 }
+
+/* ---------------------------------- DOM -------------------------------------- */
 
 const el = {};
 
 function cacheDom() {
-  el.screens = document.querySelectorAll('.screen');
-  el.siteHeader = document.querySelector('.site-header');
-
-  el.playerCountValue = document.getElementById('player-count-value');
-  el.playerMinus = document.getElementById('btn-player-minus');
-  el.playerPlus = document.getElementById('btn-player-plus');
-  el.impostorCountValue = document.getElementById('impostor-count-value');
-  el.impostorMinus = document.getElementById('btn-impostor-minus');
-  el.impostorPlus = document.getElementById('btn-impostor-plus');
-  el.impostorHint = document.getElementById('impostor-hint');
-  el.categoryOptions = document.getElementById('category-options');
-  el.btnStart = document.getElementById('btn-start-game');
-
-  el.revealPlayerLabel = document.getElementById('reveal-player-label');
-  el.revealProgress = document.getElementById('reveal-progress');
-  el.holdBtn = document.getElementById('hold-reveal-btn');
-  el.holdPrompt = document.getElementById('hold-prompt');
-  el.rolePanel = document.getElementById('role-panel');
-  el.roleCategoryLabel = document.getElementById('role-category-label');
-  el.roleContent = document.getElementById('role-content');
-  el.btnNextPlayer = document.getElementById('btn-next-player');
-
-  el.timerDisplay = document.getElementById('timer-display');
-  el.timerMinus = document.getElementById('btn-timer-minus');
-  el.timerPlus = document.getElementById('btn-timer-plus');
-  el.timerToggle = document.getElementById('btn-timer-toggle');
-  el.btnGoToVote = document.getElementById('btn-go-to-vote');
-
-  el.voteButtons = document.getElementById('vote-buttons');
-  el.btnReveal = document.getElementById('btn-reveal');
-
-  el.resultsConceptA = document.getElementById('results-concept-a');
-  el.resultsConceptB = document.getElementById('results-concept-b');
-  el.resultsImpostors = document.getElementById('results-impostors');
-  el.resultsVotes = document.getElementById('results-votes');
-  el.btnPlayAgain = document.getElementById('btn-play-again');
-  el.btnNewGame = document.getElementById('btn-new-game');
-}
-
-function showScreen(name) {
-  el.screens.forEach((section) => { section.hidden = section.dataset.screen !== name; });
-  if (el.siteHeader) el.siteHeader.hidden = name !== 'setup';
-  window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
-}
-
-function renderCategoryOptions() {
-  el.categoryOptions.innerHTML = '';
-  const makePill = (key, label, count) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'category-pill';
-    btn.setAttribute('role', 'radio');
-    btn.setAttribute('aria-checked', String(settings.categoryKey === key));
-    if (settings.categoryKey === key) btn.classList.add('is-selected');
-    btn.innerHTML = `<span class="category-pill-name">${label}</span>` +
-      (count ? `<span class="category-pill-count">${count} pares</span>` : '<span class="category-pill-count">Todas las categorías</span>');
-    btn.addEventListener('click', () => { settings.categoryKey = key; renderCategoryOptions(); });
-    return btn;
-  };
-  el.categoryOptions.appendChild(makePill(PAIR_MEZCLA_KEY, 'Mezcla de todas', null));
-  PAIR_CATEGORY_KEYS.forEach((key) => {
-    el.categoryOptions.appendChild(makePill(key, PAIR_CATEGORIES[key].label, PAIR_CATEGORIES[key].pairs.length));
+  [
+    'mode-options', 'player-count-value', 'btn-player-minus', 'btn-player-plus',
+    'impostor-count-value', 'btn-impostor-minus', 'btn-impostor-plus', 'impostor-hint',
+    'names-grid', 'btn-shuffle-names', 'category-options', 'category-summary', 'category-warning',
+    'btn-cat-all', 'btn-cat-none', 'draw-time-row', 'time-value', 'btn-time-minus', 'btn-time-plus',
+    'stroke-rounds-row', 'strokes-value', 'btn-strokes-minus', 'btn-strokes-plus',
+    'show-category-row', 'opt-show-category', 'opt-secret-vote', 'opt-sound', 'opt-vibrate',
+    'setup-scoreline', 'setup-score-text', 'btn-reset-scores', 'btn-start-game',
+    'game-bar-title', 'btn-exit',
+    'reveal-dots', 'reveal-player', 'hold-reveal-btn', 'role-panel', 'role-category-label', 'role-emoji',
+    'role-content', 'role-extra', 'btn-next-player',
+    'draw-help', 'timer-display', 'timer-ring', 'btn-timer-minus', 'btn-timer-toggle', 'btn-timer-plus',
+    'starter-name', 'btn-go-to-vote',
+    'canvas-progress', 'canvas-color', 'canvas-player', 'canvas-help', 'canvas', 'canvas-category',
+    'btn-canvas-undo', 'btn-canvas-next',
+    'vote-drawing', 'vote-area',
+    'verdict', 'verdict-emoji', 'verdict-title', 'verdict-text', 'guess-box', 'guess-text',
+    'btn-guess-yes', 'btn-guess-no', 'reveal-box', 'results-concept-a', 'results-category',
+    'results-alt-wrap', 'results-concept-b', 'results-impostors-label', 'results-impostors', 'vote-summary',
+    'results-drawing-wrap', 'results-drawing', 'btn-save-drawing',
+    'scoreboard-card', 'scoreboard', 'results-actions', 'btn-play-again', 'btn-new-game'
+  ].forEach((id) => {
+    el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
   });
 }
 
+/* -------------------------------- Pantalla: Setup ----------------------------- */
+
 function renderSetup() {
+  Kit.renderOptions(el.modeOptions, MODES, {
+    className: 'mode-card',
+    isSelected: (key) => settings.mode === key,
+    onSelect: (key) => {
+      settings.mode = key;
+      saveSettings();
+      renderSetup();
+    }
+  });
+
   el.playerCountValue.textContent = String(settings.playerCount);
-  el.playerMinus.disabled = settings.playerCount <= MIN_PLAYERS;
-  el.playerPlus.disabled = settings.playerCount >= MAX_PLAYERS;
+  el.btnPlayerMinus.disabled = settings.playerCount <= MIN_PLAYERS;
+  el.btnPlayerPlus.disabled = settings.playerCount >= MAX_PLAYERS;
 
   const max = maxImpostorsFor(settings.playerCount);
   el.impostorCountValue.textContent = String(settings.impostorCount);
-  el.impostorMinus.disabled = settings.impostorCount <= 1;
-  el.impostorPlus.disabled = settings.impostorCount >= max;
+  el.btnImpostorMinus.disabled = settings.impostorCount <= 1;
+  el.btnImpostorPlus.disabled = settings.impostorCount >= max;
   el.impostorHint.textContent = `Máximo ${max} para ${settings.playerCount} jugadores`;
 
-  renderCategoryOptions();
+  Kit.renderNameInputs(el.namesGrid, settings.playerCount);
+
+  Kit.renderOptions(el.categoryOptions, PAIR_CATEGORY_KEYS.map((key) => ({
+    key,
+    emoji: PAIR_CATEGORIES[key].emoji,
+    label: PAIR_CATEGORIES[key].label,
+    sub: String(PAIR_CATEGORIES[key].pairs.length)
+  })), {
+    multi: true,
+    isSelected: (key) => settings.categories.includes(key),
+    onSelect: (key) => {
+      settings.categories = settings.categories.includes(key)
+        ? settings.categories.filter((k) => k !== key)
+        : settings.categories.concat(key);
+      saveSettings();
+      renderSetup();
+    }
+  });
+  const pool = buildPool();
+  el.categorySummary.textContent = `${pool.length} conceptos`;
+  el.categoryWarning.hidden = pool.length > 0;
+  el.btnStartGame.disabled = pool.length === 0;
+
+  const isCanvas = settings.mode === 'lienzo';
+  el.drawTimeRow.hidden = isCanvas;
+  el.strokeRoundsRow.hidden = !isCanvas;
+  el.showCategoryRow.hidden = settings.mode === 'clasico';
+
+  const idx = DRAW_TIME_OPTIONS.indexOf(settings.drawSeconds);
+  el.timeValue.textContent = settings.drawSeconds >= 60 && settings.drawSeconds % 60 === 0
+    ? `${settings.drawSeconds / 60}′`
+    : `${settings.drawSeconds}″`;
+  el.btnTimeMinus.disabled = idx <= 0;
+  el.btnTimePlus.disabled = idx >= DRAW_TIME_OPTIONS.length - 1;
+
+  el.strokesValue.textContent = String(settings.strokeRounds);
+  el.btnStrokesMinus.disabled = settings.strokeRounds <= MIN_STROKE_ROUNDS;
+  el.btnStrokesPlus.disabled = settings.strokeRounds >= MAX_STROKE_ROUNDS;
+
+  el.optShowCategory.checked = settings.showCategory;
+  el.optSecretVote.checked = settings.secretVote;
+
+  el.setupScoreline.hidden = scores.rounds === 0;
+  el.setupScoreText.textContent = `🏆 Marcador: ${scores.rounds} ${scores.rounds === 1 ? 'ronda' : 'rondas'}`;
 }
 
 function changePlayerCount(delta) {
-  settings.playerCount = clamp(settings.playerCount + delta, MIN_PLAYERS, MAX_PLAYERS);
+  settings.playerCount = Kit.clamp(settings.playerCount + delta, MIN_PLAYERS, MAX_PLAYERS);
   const max = maxImpostorsFor(settings.playerCount);
-  settings.impostorCount = impostorManuallySet ? clamp(settings.impostorCount, 1, max) : suggestedImpostorCount(settings.playerCount);
+  settings.impostorCount = impostorManuallySet
+    ? Kit.clamp(settings.impostorCount, 1, max)
+    : suggestedImpostorCount(settings.playerCount);
+  saveSettings();
   renderSetup();
 }
 
 function changeImpostorCount(delta) {
   const max = maxImpostorsFor(settings.playerCount);
-  settings.impostorCount = clamp(settings.impostorCount + delta, 1, max);
+  settings.impostorCount = Kit.clamp(settings.impostorCount + delta, 1, max);
   impostorManuallySet = true;
+  saveSettings();
   renderSetup();
 }
 
-/* -------------------------------- Reveal -------------------------------- */
+function changeDrawTime(delta) {
+  const idx = Kit.clamp(DRAW_TIME_OPTIONS.indexOf(settings.drawSeconds) + delta, 0, DRAW_TIME_OPTIONS.length - 1);
+  settings.drawSeconds = DRAW_TIME_OPTIONS[idx];
+  saveSettings();
+  renderSetup();
+}
+
+function changeStrokeRounds(delta) {
+  settings.strokeRounds = Kit.clamp(settings.strokeRounds + delta, MIN_STROKE_ROUNDS, MAX_STROKE_ROUNDS);
+  saveSettings();
+  renderSetup();
+}
+
+/* -------------------------------- Pantalla: Reparto ----------------------------- */
 
 function renderRevealForCurrentPlayer() {
-  const playerNumber = round.currentIndex + 1;
-  el.revealPlayerLabel.textContent = `Jugador ${playerNumber}`;
-  el.revealProgress.textContent = `Jugador ${playerNumber} de ${settings.playerCount}`;
-
-  el.rolePanel.hidden = true;
-  el.roleContent.textContent = '';
-  el.roleCategoryLabel.textContent = '';
-  round.hasRevealedCurrent = false;
+  const i = round.current;
+  el.revealPlayer.textContent = round.names[i];
+  el.revealDots.innerHTML = round.names
+    .map((_, idx) => `<li class="${idx < i ? 'is-done' : idx === i ? 'is-current' : ''}"></li>`)
+    .join('');
+  clearRole();
   el.btnNextPlayer.disabled = true;
-  el.holdBtn.classList.remove('is-held');
-  el.holdPrompt.hidden = false;
+  el.btnNextPlayer.textContent = i === round.names.length - 1 ? 'Ya lo vi, ¡a dibujar!' : 'Ya lo vi, pasar al siguiente';
 }
 
-function populateRoleContent() {
-  const isImpostor = round.impostorIndices.has(round.currentIndex);
-  const concept = isImpostor ? round.pair.b : round.pair.a;
-  el.roleCategoryLabel.textContent = `Categoría: ${round.categoryLabel}`;
-  el.roleContent.innerHTML = `<span class="concept-emoji">${concept.emoji}</span><span class="concept-name">${concept.nombre}</span>`;
+function clearRole() {
+  el.holdRevealBtn.classList.remove('is-held');
+  el.rolePanel.classList.remove('is-alert');
+  el.roleCategoryLabel.textContent = '';
+  el.roleEmoji.textContent = '';
+  el.roleContent.textContent = '';
+  el.roleContent.className = 'role-content';
+  el.roleExtra.textContent = '';
 }
 
-function startRevealHold(evt) {
-  if (evt) evt.preventDefault();
+function populateRole() {
+  const isImpostor = round.impostors.has(round.current);
+  const catText = `Categoría: ${round.catLabel}`;
+
+  if (round.mode === 'clasico' || !isImpostor) {
+    // En «Concepto parecido» el impostor ve un concepto normal, sin pistas.
+    const concept = isImpostor ? round.pair.b : round.pair.a;
+    el.roleCategoryLabel.textContent = catText;
+    el.roleEmoji.textContent = concept.emoji;
+    el.roleContent.textContent = concept.nombre;
+    el.roleExtra.textContent = round.mode === 'lienzo' ? 'Un trazo por turno, ¡sin ponérselo fácil!' : 'Dibújalo sin letras ni números';
+    return;
+  }
+
+  el.rolePanel.classList.add('is-alert');
+  el.roleCategoryLabel.textContent = settings.showCategory ? catText : 'Categoría secreta';
+  el.roleEmoji.textContent = '🕵️';
+  el.roleContent.textContent = 'Eres el impostor';
+  el.roleContent.classList.add('is-impostor');
+  el.roleExtra.textContent = round.mode === 'lienzo'
+    ? 'Mira los trazos de los demás y síguele la corriente'
+    : 'Dibuja algo que no te delate';
+}
+
+function startRevealHold() {
   if (!round) return;
-  populateRoleContent();
-  el.rolePanel.hidden = false;
-  el.holdPrompt.hidden = true;
-  el.holdBtn.classList.add('is-held');
-  round.hasRevealedCurrent = true;
+  populateRole();
+  el.holdRevealBtn.classList.add('is-held');
   el.btnNextPlayer.disabled = false;
+  Kit.buzz(20);
 }
 
 function endRevealHold() {
-  el.rolePanel.hidden = true;
-  el.roleContent.innerHTML = '';
-  el.roleCategoryLabel.textContent = '';
-  el.holdBtn.classList.remove('is-held');
-  if (round) el.holdPrompt.hidden = false;
+  el.holdRevealBtn.classList.remove('is-held');
+  setTimeout(() => {
+    if (!el.holdRevealBtn.classList.contains('is-held')) clearRole();
+  }, 300);
 }
 
 function goToNextPlayer() {
-  if (isAdvancing) return;
-  if (!round || el.btnNextPlayer.disabled) return;
+  if (isAdvancing || !round || el.btnNextPlayer.disabled) return;
   isAdvancing = true;
-  el.btnNextPlayer.disabled = true;
-
-  round.currentIndex += 1;
-  if (round.currentIndex >= settings.playerCount) {
-    startDrawPhase();
+  clearRole();
+  round.current += 1;
+  if (round.current >= round.names.length) {
+    if (round.mode === 'lienzo') startCanvasPhase();
+    else startDrawPhase();
   } else {
     renderRevealForCurrentPlayer();
+    Kit.sfx.tap();
   }
   isAdvancing = false;
 }
 
-/* ------------------------------ Fase dibujo ------------------------------ */
-
-function clearRoundTimer() {
-  if (round && round.timerIntervalId !== null) {
-    clearInterval(round.timerIntervalId);
-    round.timerIntervalId = null;
-  }
-}
-
-function updateTimerDisplay() {
-  el.timerDisplay.textContent = formatTime(round.timerSeconds);
-  el.timerDisplay.classList.toggle('is-finished', round.timerSeconds === 0);
-}
-
-function updateTimerToggleLabel() {
-  el.timerToggle.textContent = round.timerRunning ? 'Pausar' : 'Reanudar';
-}
-
-function tickTimer() {
-  if (!round || !round.timerRunning) return;
-  if (round.timerSeconds > 0) {
-    round.timerSeconds -= 1;
-    updateTimerDisplay();
-    if (round.timerSeconds === 0) {
-      round.timerRunning = false;
-      updateTimerToggleLabel();
-    }
-  }
-}
+/* ---------------------------- Fase dibujo en papel ---------------------------- */
 
 function startDrawPhase() {
-  clearRoundTimer();
-  round.timerSeconds = DEFAULT_DRAW_SECONDS;
-  round.timerRunning = true;
-  round.timerIntervalId = setInterval(tickTimer, 1000);
-  updateTimerDisplay();
-  updateTimerToggleLabel();
-  showScreen('draw');
+  el.drawHelp.innerHTML = round.mode === 'ciego'
+    ? 'Cada uno dibuja su concepto en un papel, <strong>sin enseñarlo</strong>. El impostor solo conoce la categoría: ¡que no se note!'
+    : 'Cada uno dibuja su concepto en un papel, <strong>sin enseñarlo</strong> todavía. Nada de letras ni números.';
+  el.starterName.textContent = Kit.pick(round.names);
+  timer.start(settings.drawSeconds);
+  Kit.sfx.reveal();
+  Kit.showScreen('draw');
 }
 
-function adjustTimer(deltaSeconds) {
-  if (!round) return;
-  round.timerSeconds = clamp(round.timerSeconds + deltaSeconds, MIN_TIMER_SECONDS, MAX_TIMER_SECONDS);
-  updateTimerDisplay();
+/* ----------------------------- Lienzo compartido ------------------------------ */
+
+const canvasState = {
+  ctx: null,
+  strokes: [],   // { color, points: [[x, y], ...] } en coordenadas 0..1
+  pending: null, // trazo del turno actual, aún sin confirmar
+  drawing: false,
+  turn: 0,
+  totalTurns: 0,
+  order: []
+};
+
+function sizeCanvas() {
+  const c = el.canvas;
+  const rect = c.getBoundingClientRect();
+  if (!rect.width) return;
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  c.width = Math.round(rect.width * dpr);
+  c.height = Math.round(rect.height * dpr);
+  canvasState.ctx = c.getContext('2d');
+  redrawCanvas();
 }
 
-function toggleTimer() {
-  if (!round || round.timerSeconds === 0) return;
-  round.timerRunning = !round.timerRunning;
-  updateTimerToggleLabel();
+function drawStroke(ctx, stroke, w, h) {
+  const pts = stroke.points;
+  if (!pts.length) return;
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
+  ctx.lineWidth = Math.max(3, w * 0.012);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0][0] * w, pts[0][1] * h, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = ((pts[i][0] + pts[i + 1][0]) / 2) * w;
+    const my = ((pts[i][1] + pts[i + 1][1]) / 2) * h;
+    ctx.quadraticCurveTo(pts[i][0] * w, pts[i][1] * h, mx, my);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last[0] * w, last[1] * h);
+  ctx.stroke();
+}
+
+function paintAll(ctx, w, h) {
+  ctx.fillStyle = '#fbf7ef';
+  ctx.fillRect(0, 0, w, h);
+  canvasState.strokes.forEach((s) => drawStroke(ctx, s, w, h));
+  if (canvasState.pending) drawStroke(ctx, canvasState.pending, w, h);
+}
+
+function redrawCanvas() {
+  const { ctx } = canvasState;
+  if (!ctx) return;
+  paintAll(ctx, el.canvas.width, el.canvas.height);
+}
+
+function canvasPoint(e) {
+  const rect = el.canvas.getBoundingClientRect();
+  return [
+    Kit.clamp((e.clientX - rect.left) / rect.width, 0, 1),
+    Kit.clamp((e.clientY - rect.top) / rect.height, 0, 1)
+  ];
+}
+
+function currentCanvasPlayer() {
+  return canvasState.order[canvasState.turn % canvasState.order.length];
+}
+
+function renderCanvasTurn() {
+  const p = currentCanvasPlayer();
+  const lap = Math.floor(canvasState.turn / canvasState.order.length) + 1;
+  el.canvasProgress.textContent = `Trazo ${canvasState.turn + 1} de ${canvasState.totalTurns} · Vuelta ${lap} de ${settings.strokeRounds}`;
+  el.canvasPlayer.textContent = round.names[p];
+  el.canvasColor.style.setProperty('--dot', PLAYER_COLORS[p % PLAYER_COLORS.length]);
+  el.canvasCategory.textContent = settings.showCategory ? round.catLabel : '';
+  el.btnCanvasUndo.disabled = !canvasState.pending;
+  el.btnCanvasNext.disabled = !canvasState.pending;
+  el.btnCanvasNext.textContent = canvasState.turn + 1 >= canvasState.totalTurns ? 'Terminar y votar ▶' : 'Listo, siguiente ▶';
+}
+
+function startCanvasPhase() {
+  const n = round.names.length;
+  const first = Math.floor(Math.random() * n);
+  canvasState.order = Array.from({ length: n }, (_, i) => (first + i) % n);
+  canvasState.strokes = [];
+  canvasState.pending = null;
+  canvasState.turn = 0;
+  canvasState.totalTurns = n * settings.strokeRounds;
+  Kit.sfx.reveal();
+  Kit.showScreen('canvas');
+  sizeCanvas();
+  renderCanvasTurn();
+}
+
+function onCanvasDown(e) {
+  if (!round || round.mode !== 'lienzo' || canvasState.pending) return;
+  e.preventDefault();
+  try { el.canvas.setPointerCapture(e.pointerId); } catch (err) { /* sin captura */ }
+  const p = currentCanvasPlayer();
+  canvasState.pending = { color: PLAYER_COLORS[p % PLAYER_COLORS.length], points: [canvasPoint(e)] };
+  canvasState.drawing = true;
+  redrawCanvas();
+}
+
+function onCanvasMove(e) {
+  if (!canvasState.drawing || !canvasState.pending) return;
+  e.preventDefault();
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  events.forEach((ev) => canvasState.pending.points.push(canvasPoint(ev)));
+  redrawCanvas();
+}
+
+function onCanvasUp() {
+  if (!canvasState.drawing) return;
+  canvasState.drawing = false;
+  Kit.buzz(15);
+  renderCanvasTurn();
+}
+
+function undoCanvasStroke() {
+  canvasState.pending = null;
+  canvasState.drawing = false;
+  redrawCanvas();
+  renderCanvasTurn();
+}
+
+function nextCanvasTurn() {
+  if (!canvasState.pending) return;
+  canvasState.strokes.push(canvasState.pending);
+  canvasState.pending = null;
+  canvasState.turn += 1;
+  Kit.sfx.tap();
+  if (canvasState.turn >= canvasState.totalTurns) {
+    round.drawingUrl = exportDrawing();
+    startVote();
+  } else {
+    renderCanvasTurn();
+  }
+}
+
+/** Exporta el dibujo a PNG a tamaño fijo (independiente de la pantalla). */
+function exportDrawing() {
+  const size = 900;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  paintAll(c.getContext('2d'), size, size);
+  return c.toDataURL('image/png');
 }
 
 /* -------------------------------- Votación -------------------------------- */
 
-function goToVote() {
-  clearRoundTimer();
-  round.votes = new Array(settings.playerCount).fill(0);
-  renderVoteButtons();
-  showScreen('vote');
+function startVote() {
+  timer.stop();
+  el.voteDrawing.hidden = !round.drawingUrl;
+  if (round.drawingUrl) el.voteDrawing.src = round.drawingUrl;
+  Kit.runVote(el.voteArea, {
+    names: round.names,
+    secret: settings.secretVote,
+    onDone: finishVote
+  });
+  Kit.showScreen('vote');
 }
 
-function renderVoteButtons() {
-  el.voteButtons.innerHTML = '';
-  for (let i = 0; i < settings.playerCount; i++) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'vote-btn';
-    btn.innerHTML = `<span>Jugador ${i + 1}</span><span class="vote-count">${round.votes[i]}</span>`;
-    btn.addEventListener('click', () => {
-      round.votes[i] += 1;
-      renderVoteButtons();
-    });
-    el.voteButtons.appendChild(btn);
+function finishVote(result) {
+  const k = round.impostors.size;
+  round.vote = result;
+  round.tally = Kit.tally(result, k);
+  const caught = round.tally.accused.filter((i) => round.impostors.has(i));
+  round.allCaught = caught.length === k;
+
+  el.guessBox.hidden = true;
+  el.revealBox.hidden = true;
+  el.scoreboardCard.hidden = true;
+  el.resultsActions.hidden = true;
+  Kit.showScreen('results');
+
+  // Si el impostor sabía que lo era, aún puede ganar adivinando el concepto.
+  if (round.allCaught && round.mode !== 'clasico') {
+    askForGuess();
+  } else {
+    finalizeRound(false);
   }
 }
 
 /* -------------------------------- Resultados -------------------------------- */
 
-function endRound() {
-  if (!round) return;
+function setVerdict(type, emoji, title, text) {
+  el.verdict.className = 'verdict' + (type ? ` is-${type}` : '');
+  el.verdictEmoji.textContent = emoji;
+  el.verdictTitle.textContent = title;
+  el.verdictText.innerHTML = text;
+  el.verdictEmoji.style.animation = 'none';
+  void el.verdictEmoji.offsetWidth;
+  el.verdictEmoji.style.animation = '';
+}
 
-  el.resultsConceptA.innerHTML = `${round.pair.a.emoji} ${round.pair.a.nombre}`;
-  el.resultsConceptB.innerHTML = `${round.pair.b.emoji} ${round.pair.b.nombre}`;
+function namesOf(indices) {
+  return indices.map((i) => `<strong>${Kit.esc(round.names[i])}</strong>`).join(' y ');
+}
 
-  const impostorNumbers = Array.from(round.impostorIndices).map((i) => i + 1).sort((a, b) => a - b);
-  el.resultsImpostors.innerHTML = '';
-  impostorNumbers.forEach((num) => {
-    const li = document.createElement('li');
-    li.textContent = `Jugador ${num}`;
-    el.resultsImpostors.appendChild(li);
-  });
+function impostorList() {
+  return Array.from(round.impostors).sort((a, b) => a - b);
+}
 
-  const maxVotes = Math.max(...round.votes);
-  const mostVoted = round.votes
-    .map((v, i) => ({ v, i }))
-    .filter((x) => x.v === maxVotes && maxVotes > 0)
-    .map((x) => x.i + 1);
-  const correctGuess = maxVotes > 0 && mostVoted.some((num) => impostorNumbers.includes(num));
-  el.resultsVotes.textContent = maxVotes === 0
-    ? 'Nadie votó.'
-    : `Más votado: Jugador ${mostVoted.join(', Jugador ')} (${maxVotes} voto${maxVotes === 1 ? '' : 's'}). ${correctGuess ? '¡Acertasteis!' : 'No acertasteis.'}`;
+function askForGuess() {
+  const imps = impostorList();
+  const plural = imps.length > 1;
+  setVerdict('', '🎯', plural ? '¡Pillados!' : '¡Pillado!',
+    `Habéis descubierto a ${namesOf(imps)}. Pero aún ${plural ? 'pueden' : 'puede'} ganar…`);
+  el.guessText.innerHTML = `Última oportunidad: ${namesOf(imps)}, decid en voz alta qué creéis que estaba dibujando el grupo.`;
+  el.guessBox.hidden = false;
+  Kit.sfx.reveal();
+}
 
-  lastPairKey = round.pairKey;
-  showScreen('results');
+function finalizeRound(guessed) {
+  const imps = impostorList();
+  const k = imps.length;
+  const t = round.tally;
+  const crew = round.names.map((_, i) => i).filter((i) => !round.impostors.has(i));
+  const crewWins = round.allCaught && !guessed;
+
+  scores.startRound();
+  if (crewWins) {
+    setVerdict('win', '🎉', k > 1 ? '¡Impostores descubiertos!' : '¡Impostor descubierto!',
+      `Ojo de halcón: ${namesOf(imps)} no ${k > 1 ? 'pudieron' : 'pudo'} engañaros. El grupo gana 1 punto cada uno.`);
+    crew.forEach((i) => scores.add(round.names[i], 1));
+  } else {
+    if (round.allCaught && guessed) {
+      setVerdict('lose', '😈', '¡Os la ha colado!', `Pillasteis a ${namesOf(imps)}, pero ${k > 1 ? 'adivinaron' : 'adivinó'} el concepto. 2 puntos por impostor.`);
+    } else if (t.tie) {
+      setVerdict('lose', '🤝', 'Empate en la votación', `No se expulsa a nadie y ${k > 1 ? 'los impostores se escapan' : 'el impostor se escapa'}. 2 puntos por impostor.`);
+    } else {
+      const innocents = t.accused.filter((i) => !round.impostors.has(i));
+      setVerdict('lose', '😬', innocents.length ? '¡Acusasteis a un inocente!' : 'El impostor se ha librado',
+        (innocents.length ? `${namesOf(innocents)} dibujaba lo mismo que el resto. ` : '') +
+        `${namesOf(imps)} gana${k > 1 ? 'n' : ''} 2 puntos.`);
+    }
+    imps.forEach((i) => scores.add(round.names[i], 2));
+  }
+  scores.endRound();
+
+  if (crewWins) {
+    Kit.sfx.win();
+    Kit.confetti(['#f97316', '#f43f5e', '#facc15', '#fbf7ef', '#22c55e']);
+  } else {
+    Kit.sfx.lose();
+  }
+  Kit.buzz(crewWins ? [60, 40, 60] : 200);
+
+  renderRevealBox();
+  scores.render(el.scoreboard, round.names);
+  el.guessBox.hidden = true;
+  el.scoreboardCard.hidden = false;
+  el.resultsActions.hidden = false;
+}
+
+function renderRevealBox() {
+  const imps = impostorList();
+  el.resultsConceptA.textContent = `${round.pair.a.emoji} ${round.pair.a.nombre}`;
+  el.resultsCategory.textContent = `${round.catEmoji} ${round.catLabel}`;
+  el.resultsAltWrap.hidden = round.mode !== 'clasico';
+  el.resultsConceptB.textContent = `${round.pair.b.emoji} ${round.pair.b.nombre}`;
+  el.resultsImpostorsLabel.textContent = imps.length > 1 ? 'Los impostores eran' : 'El impostor era';
+  el.resultsImpostors.innerHTML = imps.map((i) => `<li>${Kit.esc(round.names[i])}</li>`).join('');
+
+  const ranked = round.vote.votes
+    .map((v, i) => ({ v, name: round.names[i] }))
+    .filter((x) => x.v > 0)
+    .sort((a, b) => b.v - a.v);
+  el.voteSummary.textContent = ranked.length ? 'Votos: ' + ranked.map((x) => `${x.name} ${x.v}`).join(' · ') : '';
+
+  el.resultsDrawingWrap.hidden = !round.drawingUrl;
+  if (round.drawingUrl) {
+    el.resultsDrawing.src = round.drawingUrl;
+    el.btnSaveDrawing.href = round.drawingUrl;
+    el.btnSaveDrawing.download = `dibujo-impostor-${round.pair.a.nombre.toLowerCase().replace(/\s+/g, '-')}.png`;
+  }
+  el.revealBox.hidden = false;
 }
 
 /* ---------------------------------- Ronda ----------------------------------- */
 
 function startNewRound() {
-  const picked = pickPairForCategory(settings.categoryKey);
+  const pool = buildPool();
+  if (!pool.length) {
+    backToSetup();
+    return;
+  }
+  const n = settings.playerCount;
+  const item = pickFromPool(pool);
+  const cat = PAIR_CATEGORIES[item.key];
+
   round = {
-    pair: picked.pair,
-    pairKey: picked.pairKey,
-    categoryLabel: picked.categoryLabel,
-    impostorIndices: pickImpostorIndices(settings.playerCount, settings.impostorCount),
-    currentIndex: 0,
-    hasRevealedCurrent: false,
-    timerSeconds: DEFAULT_DRAW_SECONDS,
-    timerRunning: false,
-    timerIntervalId: null,
-    votes: []
+    mode: settings.mode,
+    names: Kit.playerNames(n),
+    impostors: Kit.pickIndices(n, Kit.clamp(settings.impostorCount, 1, maxImpostorsFor(n))),
+    pair: item.pair,
+    catLabel: cat.label,
+    catEmoji: cat.emoji,
+    current: 0,
+    vote: null,
+    tally: null,
+    allCaught: false,
+    drawingUrl: null
   };
-  showScreen('reveal');
+
+  el.gameBarTitle.textContent = `Ronda ${scores.rounds + 1} · ${modeInfo(round.mode).label}`;
+  Kit.keepAwake(true);
+  Kit.showScreen('reveal');
   renderRevealForCurrentPlayer();
 }
 
 function backToSetup() {
-  clearRoundTimer();
+  if (timer) timer.stop();
   round = null;
+  Kit.keepAwake(false);
   renderSetup();
-  showScreen('setup');
+  Kit.showScreen('setup');
 }
 
+function confirmExit() {
+  if (!round) return true;
+  return window.confirm('¿Salir de la partida? Se perderá la ronda actual (el marcador se mantiene).');
+}
+
+/* --------------------------------- Eventos ----------------------------------- */
+
 function bindEvents() {
-  el.playerMinus.addEventListener('click', () => changePlayerCount(-1));
-  el.playerPlus.addEventListener('click', () => changePlayerCount(1));
-  el.impostorMinus.addEventListener('click', () => changeImpostorCount(-1));
-  el.impostorPlus.addEventListener('click', () => changeImpostorCount(1));
+  el.btnPlayerMinus.addEventListener('click', () => changePlayerCount(-1));
+  el.btnPlayerPlus.addEventListener('click', () => changePlayerCount(1));
+  el.btnImpostorMinus.addEventListener('click', () => changeImpostorCount(-1));
+  el.btnImpostorPlus.addEventListener('click', () => changeImpostorCount(1));
+  el.btnTimeMinus.addEventListener('click', () => changeDrawTime(-1));
+  el.btnTimePlus.addEventListener('click', () => changeDrawTime(1));
+  el.btnStrokesMinus.addEventListener('click', () => changeStrokeRounds(-1));
+  el.btnStrokesPlus.addEventListener('click', () => changeStrokeRounds(1));
+  el.btnShuffleNames.addEventListener('click', () => {
+    Kit.shuffleNames(el.namesGrid, settings.playerCount);
+    Kit.toast('Orden mezclado 🔀');
+  });
+  el.btnCatAll.addEventListener('click', () => {
+    settings.categories = PAIR_CATEGORY_KEYS.slice();
+    saveSettings();
+    renderSetup();
+  });
+  el.btnCatNone.addEventListener('click', () => {
+    settings.categories = [];
+    saveSettings();
+    renderSetup();
+  });
 
-  el.btnStart.addEventListener('click', () => { saveSettings(); startNewRound(); });
+  el.optShowCategory.addEventListener('change', () => {
+    settings.showCategory = el.optShowCategory.checked;
+    saveSettings();
+  });
+  el.optSecretVote.addEventListener('change', () => {
+    settings.secretVote = el.optSecretVote.checked;
+    saveSettings();
+  });
+  Kit.bindPrefToggle(el.optSound, 'sound');
+  Kit.bindPrefToggle(el.optVibrate, 'vibrate');
 
-  const press = (e) => startRevealHold(e);
-  const release = (e) => { if (e) e.preventDefault(); endRevealHold(); };
-  el.holdBtn.addEventListener('pointerdown', press);
-  el.holdBtn.addEventListener('pointerup', release);
-  el.holdBtn.addEventListener('pointerleave', release);
-  el.holdBtn.addEventListener('pointercancel', release);
-  el.holdBtn.addEventListener('touchstart', press, { passive: false });
-  el.holdBtn.addEventListener('touchend', release);
-  el.holdBtn.addEventListener('touchcancel', release);
-  el.holdBtn.addEventListener('contextmenu', (e) => e.preventDefault());
-  el.holdBtn.addEventListener('dragstart', (e) => e.preventDefault());
+  el.btnResetScores.addEventListener('click', () => {
+    scores.reset();
+    renderSetup();
+    Kit.toast('Marcador a cero');
+  });
 
+  el.btnStartGame.addEventListener('click', () => {
+    saveSettings();
+    try { history.pushState({ inGame: true }, ''); } catch (err) { /* sin historial */ }
+    startNewRound();
+  });
+
+  Kit.bindHold(el.holdRevealBtn, startRevealHold, endRevealHold);
   el.btnNextPlayer.addEventListener('click', goToNextPlayer);
 
-  el.timerMinus.addEventListener('click', () => adjustTimer(-TIMER_STEP));
-  el.timerPlus.addEventListener('click', () => adjustTimer(TIMER_STEP));
-  el.timerToggle.addEventListener('click', toggleTimer);
-  el.btnGoToVote.addEventListener('click', goToVote);
+  timer = Kit.createTimer({
+    display: el.timerDisplay,
+    ring: el.timerRing,
+    toggleBtn: el.btnTimerToggle,
+    onEnd: () => Kit.toast('⏰ ¡Lápices arriba!')
+  });
+  el.btnTimerMinus.addEventListener('click', () => timer.adjust(-TIMER_STEP));
+  el.btnTimerPlus.addEventListener('click', () => timer.adjust(TIMER_STEP));
+  el.btnTimerToggle.addEventListener('click', () => timer.toggle());
+  el.btnGoToVote.addEventListener('click', startVote);
 
-  el.btnReveal.addEventListener('click', endRound);
+  el.canvas.addEventListener('pointerdown', onCanvasDown);
+  el.canvas.addEventListener('pointermove', onCanvasMove);
+  el.canvas.addEventListener('pointerup', onCanvasUp);
+  el.canvas.addEventListener('pointercancel', onCanvasUp);
+  el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.btnCanvasUndo.addEventListener('click', undoCanvasStroke);
+  el.btnCanvasNext.addEventListener('click', nextCanvasTurn);
+  window.addEventListener('resize', () => {
+    if (round && round.mode === 'lienzo' && document.body.dataset.screen === 'canvas') sizeCanvas();
+  });
+
+  el.btnGuessYes.addEventListener('click', () => finalizeRound(true));
+  el.btnGuessNo.addEventListener('click', () => finalizeRound(false));
 
   el.btnPlayAgain.addEventListener('click', startNewRound);
   el.btnNewGame.addEventListener('click', backToSetup);
+  el.btnExit.addEventListener('click', () => {
+    if (confirmExit()) backToSetup();
+  });
+
+  window.addEventListener('popstate', () => {
+    if (!round) return;
+    if (confirmExit()) {
+      backToSetup();
+    } else {
+      try { history.pushState({ inGame: true }, ''); } catch (err) { /* sin historial */ }
+    }
+  });
 }
 
 function init() {
   cacheDom();
   loadSettings();
-  renderSetup();
   bindEvents();
-  showScreen('setup');
+  renderSetup();
+  Kit.showScreen('setup');
 }
 
 document.addEventListener('DOMContentLoaded', init);
