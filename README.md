@@ -21,6 +21,19 @@ Juego de fiesta de dibujo para grupos, hecho con HTML, CSS y JavaScript puros (s
 - Votación a mano alzada o secreta, última oportunidad del impostor y marcador entre rondas.
 - Pantalla siempre encendida durante la partida y modo sin conexión (service worker).
 
+## Con código de sala
+
+Además de pasarse un móvil, se puede jugar **cada uno con el suyo**. En los ajustes, la pestaña «Con código de sala»:
+
+1. Uno pone su nombre y pulsa **Crear sala**: sale un código de 5 letras (y un botón para compartir el enlace, que ya lleva el código).
+2. El resto pone su nombre y el código y pulsa **Unirse**.
+3. Quien creó la sala la configura con los ajustes normales del juego (modo, categorías, impostores, tiempo…) y también juega. Los jugadores son los que han entrado.
+4. En cada ronda, cada uno ve su carta en su móvil manteniendo pulsado, se vota desde cada móvil y al revelar todos ven el resultado.
+
+El modo «Lienzo compartido» no está en la sala, porque se dibuja en un solo móvil.
+
+Los móviles se comunican a través de [ntfy.sh](https://ntfy.sh) (servicio gratuito de mensajes, sin cuentas), un canal por sala, sin que los mensajes se guarden en el servidor. En este modo hace falta internet. La lógica está en `sala.js` y `sala.css`, iguales en los tres juegos de fiesta.
+
 ## Puntuación
 
 - El grupo expulsa a todos los impostores (y no adivinan el concepto) → **+1** a cada jugador del grupo.

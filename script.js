@@ -117,7 +117,8 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  Kit.save(SETTINGS_KEY, settings);
+  // en una sala no se guarda su número de jugadores como el de «mismo móvil»
+  Kit.save(SETTINGS_KEY, salaBackup ? Object.assign({}, settings, salaBackup) : settings);
 }
 
 /* ---------------------------------- DOM -------------------------------------- */
@@ -153,8 +154,16 @@ function cacheDom() {
 
 /* -------------------------------- Pantalla: Setup ----------------------------- */
 
+// En la sala no hay «Lienzo compartido» (es un dibujo en un solo móvil)
+function setupModes() {
+  if (!Sala.isHosting()) return MODES;
+  const list = MODES.filter((m) => m.key !== 'lienzo');
+  if (!list.some((m) => m.key === settings.mode)) settings.mode = list[0].key;
+  return list;
+}
+
 function renderSetup() {
-  Kit.renderOptions(el.modeOptions, MODES, {
+  Kit.renderOptions(el.modeOptions, setupModes(), {
     className: 'mode-card',
     isSelected: (key) => settings.mode === key,
     onSelect: (key) => {
@@ -274,28 +283,33 @@ function clearRole() {
   el.roleExtra.textContent = '';
 }
 
-function populateRole() {
-  const isImpostor = round.impostors.has(round.current);
-  const catText = `Categoría: ${round.catLabel}`;
-
-  if (round.mode === 'clasico' || !isImpostor) {
+/** Lo que ve el jugador i en su carta (también lo usa la sala). */
+function roleCard(r, i) {
+  const isImpostor = r.impostors.has(i);
+  const catText = `Categoría: ${r.catLabel}`;
+  if (r.mode === 'clasico' || !isImpostor) {
     // En «Concepto parecido» el impostor ve un concepto normal, sin pistas.
-    const concept = isImpostor ? round.pair.b : round.pair.a;
-    el.roleCategoryLabel.textContent = catText;
-    el.roleEmoji.textContent = concept.emoji;
-    el.roleContent.textContent = concept.nombre;
-    el.roleExtra.textContent = round.mode === 'lienzo' ? 'Un trazo por turno, ¡sin ponérselo fácil!' : 'Dibújalo sin letras ni números';
-    return;
+    const concept = isImpostor ? r.pair.b : r.pair.a;
+    return {
+      label: catText, emoji: concept.emoji, content: concept.nombre,
+      extra: r.mode === 'lienzo' ? 'Un trazo por turno, ¡sin ponérselo fácil!' : 'Dibújalo sin letras ni números'
+    };
   }
+  return {
+    label: settings.showCategory ? catText : 'Categoría secreta', emoji: '🕵️', content: 'Eres el impostor',
+    extra: r.mode === 'lienzo' ? 'Mira los trazos de los demás y síguele la corriente' : 'Dibuja algo que no te delate',
+    alert: true, impostor: true
+  };
+}
 
-  el.rolePanel.classList.add('is-alert');
-  el.roleCategoryLabel.textContent = settings.showCategory ? catText : 'Categoría secreta';
-  el.roleEmoji.textContent = '🕵️';
-  el.roleContent.textContent = 'Eres el impostor';
-  el.roleContent.classList.add('is-impostor');
-  el.roleExtra.textContent = round.mode === 'lienzo'
-    ? 'Mira los trazos de los demás y síguele la corriente'
-    : 'Dibuja algo que no te delate';
+function populateRole() {
+  const c = roleCard(round, round.current);
+  el.rolePanel.classList.toggle('is-alert', Boolean(c.alert));
+  el.roleCategoryLabel.textContent = c.label;
+  el.roleEmoji.textContent = c.emoji;
+  el.roleContent.textContent = c.content;
+  el.roleContent.classList.toggle('is-impostor', Boolean(c.impostor));
+  el.roleExtra.textContent = c.extra;
 }
 
 function startRevealHold() {
@@ -671,6 +685,66 @@ function confirmExit() {
   if (!round) return true;
   return window.confirm('¿Salir de la partida? Se perderá la ronda actual (el marcador se mantiene).');
 }
+
+/* --------------------------- Con código de sala ------------------------------ */
+
+// Mientras se configura una sala, los jugadores son los que han entrado:
+// aquí se guarda el número de «mismo móvil» para devolverlo al salir.
+let salaBackup = null;
+
+function salaHosting(on, players) {
+  if (on) {
+    if (!salaBackup) salaBackup = { playerCount: settings.playerCount };
+    settings.playerCount = Kit.clamp(players, MIN_PLAYERS, MAX_PLAYERS);
+    settings.impostorCount = Kit.clamp(settings.impostorCount, 1, maxImpostorsFor(settings.playerCount));
+  } else if (salaBackup) {
+    settings.playerCount = salaBackup.playerCount;
+    salaBackup = null;
+  }
+  renderSetup();
+}
+
+/** Reparto de una ronda de sala para n jugadores, con los ajustes actuales. */
+function salaDeal(n) {
+  const pool = buildPool();
+  if (!pool.length) return { error: 'Elige al menos una categoría' };
+  const item = pickFromPool(pool);
+  const cat = PAIR_CATEGORIES[item.key];
+  const r = {
+    mode: settings.mode, impostors: Kit.pickIndices(n, Kit.clamp(settings.impostorCount, 1, maxImpostorsFor(n))),
+    pair: item.pair, catLabel: cat.label, catEmoji: cat.emoji
+  };
+  return {
+    cards: Array.from({ length: n }, (_, i) => roleCard(r, i)),
+    special: Array.from(r.impostors),
+    info: { mode: r.mode, a: r.pair.a, b: r.pair.b, catLabel: r.catLabel, catEmoji: r.catEmoji },
+    title: modeInfo(r.mode).label,
+    help: r.mode === 'ciego'
+      ? 'Cada uno dibuja su concepto en un papel, <strong>sin enseñarlo</strong>. El impostor solo conoce la categoría: ¡que no se note! Al acabar el tiempo, enseñad los dibujos a la vez.'
+      : 'Cada uno dibuja su concepto en un papel, <strong>sin enseñarlo</strong> todavía. Nada de letras ni números. Al acabar el tiempo, enseñad los dibujos a la vez.',
+    seconds: settings.drawSeconds,
+    voteTitle: '¿Quién dibujó algo raro?'
+  };
+}
+
+Sala.configure({
+  id: 'dibujo',
+  maxPlayers: MAX_PLAYERS,
+  timerStep: TIMER_STEP,
+  holdPrompt: 'Mantén pulsado para ver qué dibujar',
+  who: { one: 'impostor', many: 'impostores', One: 'Impostor', Many: 'Impostores', the: 'el impostor', The: 'El impostor' },
+  hosting: salaHosting,
+  deal: salaDeal,
+  resultsHtml(info, { names, special, esc }) {
+    const k = special.length;
+    return '<p class="results-label">El concepto era</p>' +
+      `<p class="results-word">${esc(`${info.a.emoji} ${info.a.nombre}`)}</p>` +
+      `<p class="results-meta">${esc(`${info.catEmoji} ${info.catLabel}`)}</p>` +
+      (info.mode === 'clasico' ? `<p class="results-label">${k > 1 ? 'Los impostores dibujaban' : 'El impostor dibujaba'}</p><p class="results-word is-alt">${esc(`${info.b.emoji} ${info.b.nombre}`)}</p>` : '') +
+      `<p class="results-label">${k > 1 ? 'Los impostores eran' : 'El impostor era'}</p>` +
+      `<ul class="chips">${special.slice().sort((a, b) => a - b).map((i) => `<li>${esc(names[i])}</li>`).join('')}</ul>`;
+  }
+});
 
 /* --------------------------------- Eventos ----------------------------------- */
 
