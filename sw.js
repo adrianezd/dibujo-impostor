@@ -4,7 +4,7 @@
    Estrategia «stale-while-revalidate»: responde con la copia guardada y la
    actualiza en segundo plano, así los cambios llegan en la siguiente visita. */
 
-const CACHE = 'dibujo-impostor-v3';
+const CACHE = 'dibujo-impostor-v4';
 const CORE = ['./', 'index.html', 'style.css', 'kit.js', 'sala.js', 'sala.css', 'data.js', 'script.js', 'favicon.svg', 'manifest.json', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {

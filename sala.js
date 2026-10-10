@@ -31,7 +31,7 @@ const Sala = (() => {
   const RELAY = 'https://ntfy.sh/';
   const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const CODE_LEN = 5;
-  const MIN_PLAYERS = 3;
+  let MIN_PLAYERS = 3;
   const NAME_KEY = 'party-sala-name-v1';
   const JOIN_RETRY_MS = 3000;
   const JOIN_TRIES = 5;
@@ -176,6 +176,9 @@ const Sala = (() => {
       r.players = r.players.filter((p) => p.id !== msg.f);
       playersChanged();
       broadcast();
+    } else if (msg.k === 'act') {
+      const i = r.order.indexOf(msg.f);
+      if (r.ph === 'game' && i !== -1) applyAct(i, msg.a, false);
     } else if (msg.k === 'vote') {
       const i = r.order.indexOf(msg.f);
       const t = msg.t === 'none' ? 'none' : Number(msg.t);
@@ -219,10 +222,35 @@ const Sala = (() => {
     S.beatTimer = setInterval(go, HEARTBEAT_MS);
   }
 
+  // Juegos por fases (G.custom): el juego decide qué hace cada acción y la sala la reparte
+  function applyAct(i, a, fromHost) {
+    const r = S.room;
+    const before = G.custom.phaseKey(r.g);
+    const res = G.custom.act(r.g, i, a || {}, fromHost);
+    if (!res) return;
+    if ('timer' in res) r.tm = res.timer ? { left: res.timer, total: res.timer, run: true, at: Date.now() } : null;
+    // al cambiar de fase se envía ya; las acciones sueltas (votos, listos…) se agrupan
+    broadcast(G.custom.phaseKey(r.g) !== before || 'timer' in res);
+  }
+
   function startRound() {
     const r = S.room;
     if (r.players.length < MIN_PLAYERS) { Kit.toast(`Hacen falta al menos ${MIN_PLAYERS} jugadores`); return; }
     const order = Kit.shuffled(r.players.map((p) => p.id));
+    if (G.custom) {
+      const g = G.custom.start(order.length);
+      if (!g || g.error) { Kit.toast(g && g.error ? g.error : 'No se pudo empezar'); return; }
+      r.rn += 1;
+      r.order = order;
+      r.names = order.map((id) => r.players.find((p) => p.id === id).n);
+      r.g = g;
+      r.tm = null;
+      r.ph = 'game';
+      Kit.keepAwake(true);
+      show('sala');
+      broadcast(true);
+      return;
+    }
     const dealt = G.deal(order.length);
     if (!dealt || dealt.error) { Kit.toast(dealt && dealt.error ? dealt.error : 'No se pudo repartir'); return; }
     r.rn += 1;
@@ -261,7 +289,7 @@ const Sala = (() => {
     broadcast(true);
   }
   function toLobby() {
-    Object.assign(S.room, { ph: 'lobby', order: [], names: [], cards: [], sp: [], info: null, round: null, votes: {}, tm: null, res: null });
+    Object.assign(S.room, { ph: 'lobby', order: [], names: [], cards: [], sp: [], info: null, round: null, votes: {}, tm: null, res: null, g: null });
     broadcast(true);
     enterHosting();
   }
@@ -500,6 +528,16 @@ const Sala = (() => {
   }
   const notInRound = () => '<p class="screen-help">⏳ Has entrado con la ronda empezada. Jugarás en la siguiente.</p>';
 
+  function customHtml(v) {
+    const me = myIndex(v);
+    return '<div class="center-wrap sala-wrap">' +
+      `<p class="sala-round">Partida ${v.rn} · Sala ${esc(S.code)}</p>` +
+      G.custom.render({
+        g: v.g, me, host: isHost(), names: v.names, esc, hostName: hostName(v),
+        timer: timerHtml(v), card: cardHtml()
+      }) + leaveBtn() + '</div>';
+  }
+
   function playHtml(v) {
     const me = myIndex(v);
     const head = `<p class="sala-round">Ronda ${v.rn}${v.round.title ? ` · ${esc(v.round.title)}` : ''} · Sala ${esc(S.code)}</p>`;
@@ -578,10 +616,19 @@ const Sala = (() => {
     if (isHost()) renderRoomPanel();
     if (isHost() && v.ph === 'lobby') return; // el anfitrión espera en los ajustes
     const html = v.ph === 'lobby' ? guestLobbyHtml(v)
+      : v.ph === 'game' ? customHtml(v)
       : v.ph === 'play' ? playHtml(v)
         : v.ph === 'vote' ? voteHtml(v)
           : v.ph === 'res' ? resultsHtml(v) : '';
-    if (v.ph !== S.lastPhase) {
+    const phaseKey = v.ph === 'game' ? `game-${G.custom.phaseKey(v.g)}` : v.ph;
+    if (phaseKey !== S.lastPhase && v.ph === 'game') {
+      const fx = G.custom.phaseFx ? G.custom.phaseFx(v.g, myIndex(v)) : null;
+      if (fx === 'win') { Kit.sfx.win(); Kit.confetti(); Kit.buzz([60, 40, 60]); }
+      else if (fx === 'lose') { Kit.sfx.lose(); Kit.buzz(200); }
+      else { Kit.sfx.reveal(); Kit.buzz(30); }
+      S.lastPhase = phaseKey;
+    }
+    if (v.ph !== S.lastPhase && v.ph !== 'game') {
       // efectos al cambiar de fase
       if (v.ph === 'play') { Kit.sfx.reveal(); Kit.buzz(40); }
       if (v.ph === 'res') {
@@ -610,6 +657,17 @@ const Sala = (() => {
         if (p && window.confirm(`¿Quitar a ${p.n} de la sala?`)) kick(p.id);
       };
     });
+    node.querySelectorAll('[data-act]').forEach((b) => {
+      b.onclick = () => {
+        let a;
+        try { a = JSON.parse(b.dataset.act); } catch (err) { return; }
+        Kit.sfx.tap();
+        Kit.buzz(15);
+        if (isHost()) { applyAct(myIndex(S.room), a, true); return; }
+        b.classList.add('is-sent');
+        send({ k: 'act', a });
+      };
+    });
     node.querySelectorAll('[data-vote]').forEach((b) => {
       b.onclick = () => vote(b.dataset.vote === 'none' ? 'none' : Number(b.dataset.vote));
     });
@@ -621,7 +679,7 @@ const Sala = (() => {
     const back = $('sala-role');
     Kit.bindHold(hold, () => {
       const v = S.view;
-      const card = v && v.cards[myIndex(v)];
+      const card = v && (v.ph === 'game' ? G.custom.card(v.g, myIndex(v), v.names) : v.cards[myIndex(v)]);
       if (!card) return;
       back.classList.toggle('is-alert', Boolean(card.alert));
       back.innerHTML = `<span class="role-category-label">${esc(card.label || '')}</span>` +
@@ -819,9 +877,14 @@ const Sala = (() => {
      *           seconds, voteTitle, allowNone, noneLabel, who } o { error },
      *  resultsHtml(info, { names, special, cards, esc }): lo que se revela,
      *  onRoundEnd(info): opcional.
+     *  custom: juego por fases en vez de carta + votación (El pueblo duerme):
+     *    { start(n) → estado, act(estado, jugador, acción, esAnfitrión) → null | { timer? },
+     *      render({ g, me, host, names, esc, hostName, timer, card }) → html (botones con data-act),
+     *      card(estado, jugador, names) → carta, phaseKey(estado), phaseFx(estado, jugador) }
      */
     configure(game) {
-      G = Object.assign({ maxPlayers: 15, timerStep: 30, contentClass: 'role-content', extraClass: 'role-extra' }, game);
+      G = Object.assign({ maxPlayers: 15, minPlayers: 3, timerStep: 30, contentClass: 'role-content', extraClass: 'role-extra' }, game);
+      MIN_PLAYERS = G.minPlayers;
       sessionKey = `party-sala-session-${G.id}`;
       modeKey = `party-sala-mode-${G.id}`;
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
